@@ -1,0 +1,6 @@
+.nextflow*
+conda_cache/
+.conda_cache/
+results/
+work/
+genome/
