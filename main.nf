@@ -10,7 +10,7 @@ include { RSEM_PREPARE_REFERENCE; RSEM_QUANTIFICATION } from './modules/local/rs
 // Pipeline parameters
 params.input_dir = null
 params.outdir = "results"
-params.sortmerna_db = "/home/jovyan/age/analysis/genome/rna_sequences/human_rRNA.fa"
+params.sortmerna_db = "/home/jovyan/age/analysis/genome/sortmerna_dbs/smr_v4.3_fast_db.fasta"
 params.genome_fasta = "/home/jovyan/age/analysis/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa"    // Reference genome FASTA file
 params.gtf = "/home/jovyan/age/analysis/genome/Homo_sapiens.GRCh38.114.gtf"             // GTF annotation file
 params.star_index = "/home/jovyan/age/analysis/genome/star_index"    // Pre-built STAR index directory (optional)
@@ -22,7 +22,7 @@ params.help = false
 // Function to create FASTQ pairs channel
 def createFastqPairsChannel(input_dir) {
     return Channel
-        .fromPath("${input_dir}/*/*.fastq.gz")
+        .fromPath("${input_dir}/*/*.fastq.gz", checkIfExists: true)
         .filter { it.name.contains('_R1_') }
         .map { r1_file ->
             def r2_file = file(r1_file.toString().replaceAll('_R1_', '_R2_'))
@@ -91,6 +91,9 @@ process FASTP {
     tag "$sample_id"
     publishDir "${params.outdir}/fastp", mode: 'copy'
     conda 'bioconda::fastp=0.23.4'
+
+    cpus 8
+    memory '16.GB'
 
     
     input:
@@ -366,11 +369,12 @@ workflow {
 
     // Create FASTQ pairs channel directly
     fastq_pairs_ch = createFastqPairsChannel(params.input_dir)
+
     
     // Create reference channels
-    sortmerna_db_ch = Channel.fromPath(params.sortmerna_db)
-    gtf_ch = Channel.fromPath(params.gtf)
-    genome_fasta_ch = params.genome_fasta ? Channel.fromPath(params.genome_fasta) : Channel.empty()
+    sortmerna_db_ch = Channel.fromPath(params.sortmerna_db, checkIfExists: true)
+    gtf_ch = Channel.fromPath(params.gtf, checkIfExists: true)
+    genome_fasta_ch = params.genome_fasta ? Channel.fromPath(params.genome_fasta, checkIfExists: true) : Channel.empty()
     
     // Handle STAR index - use provided or generate new one
     if (params.star_index) {
@@ -454,4 +458,5 @@ workflow {
     
     // Run MultiQC only after all analyses are complete
     MULTIQC(multiqc_input)
+
 }
