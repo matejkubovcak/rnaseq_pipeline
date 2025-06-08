@@ -4,6 +4,3 @@ conda_cache/
 results/
 work/
 genome/
-.vscode/
-*.csv
-
