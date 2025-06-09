@@ -10,7 +10,8 @@ include { RSEM_PREPARE_REFERENCE; RSEM_QUANTIFICATION } from './modules/local/rs
 // Pipeline parameters
 params.input_dir = null
 params.outdir = "results"
-params.sortmerna_db = "/home/jovyan/age/analysis/genome/sortmerna_dbs/smr_v4.3_fast_db.fasta"
+params.tRNA_sortmerna_db= "/home/jovyan/age/analysis/genome/rna_sequences/human_tRNA.fa"
+params.rRNA_sortmerna_db= "/home/jovyan/age/analysis/genome/rna_sequences/human_rRNA.fa"
 params.genome_fasta = "/home/jovyan/age/analysis/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa"    // Reference genome FASTA file
 params.gtf = "/home/jovyan/age/analysis/genome/Homo_sapiens.GRCh38.114.gtf"             // GTF annotation file
 params.star_index = "/home/jovyan/age/analysis/genome/star_index"    // Pre-built STAR index directory (optional)
@@ -122,14 +123,14 @@ process FASTP {
 process SORTMERNA {
     tag "$sample_id"
     publishDir "${params.outdir}/sortmerna", mode: 'copy'
-    conda 'bioconda::sortmerna=4.3.6 gzip'
+    conda 'bioconda::sortmerna=4.3.6'
 
-    cpus 8
-    memory '16.GB'
+
+    cpus 16
+    memory '32.GB'
     
     input:
     tuple val(sample_id), path(read1_trimmed), path(read2_trimmed)
-    path(sortmerna_db)
     
     output:
     tuple val(sample_id), path("${sample_id}_R1_non_rRNA.fastq.gz"), path("${sample_id}_R2_non_rRNA.fastq.gz")
@@ -140,11 +141,14 @@ process SORTMERNA {
     script:
     """
     # Create working directory
+    echo "Creating working directory"
     mkdir -p sortmerna_work
     
+    echo "Running SortMeRNA"
     # Merge paired reads for SortMeRNA
     sortmerna \\
-        --ref ${sortmerna_db} \\
+        --ref ${params.rRNA_sortmerna_db} \\
+        --ref ${params.tRNA_sortmerna_db} \\
         --reads ${read1_trimmed} \\
         --reads ${read2_trimmed} \\
         --fastx \\
@@ -152,8 +156,9 @@ process SORTMERNA {
         --out2 \\
         --other \\
         --workdir sortmerna_work \\
-        --threads ${task.cpus}
+        -a ${task.cpus -1}
 
+    echo "Renaming files"
     # Rename files to standard naming
     mv sortmerna_work/out/other_fwd.fq.gz ${sample_id}_R1_non_rRNA.fastq.gz
     mv sortmerna_work/out/other_rev.fq.gz ${sample_id}_R2_non_rRNA.fastq.gz
@@ -166,7 +171,6 @@ process STAR_ALIGN {
     tag "$sample_id"
     publishDir "${params.outdir}/star", mode: 'copy'
     conda 'bioconda::star=2.7.11a bioconda::samtools=1.19.2'
-    debug true
 
     cpus 32
     memory '64.GB'
@@ -302,7 +306,6 @@ process PRESEQ {
 process MULTIQC {
     publishDir "${params.outdir}/multiqc", mode: 'copy'
     conda 'bioconda::multiqc=1.19'
-    debug true
     
     input:
     path('*')
@@ -338,7 +341,8 @@ workflow {
         Parameters:
         --input_dir       Directory containing subfolders with paired FASTQ files
         --outdir          Output directory (default: results)
-        --sortmerna_db    SortMeRNA database file (default: /home/jovyan/age/analysis/genome/rna_sequences/human_rRNA.fa)
+        --rRNA_sortmerna_db    SortMeRNA database file (default: /home/jovyan/age/analysis/genome/rna_sequences/human_rRNA.fa)
+        --tRNA_sortmerna_db    SortMeRNA database file (default: /home/jovyan/age/analysis/genome/rna_sequences/human_tRNA.fa)
         --genome_fasta    Path to reference genome FASTA file (required if --star_index not provided)
         --gtf             Path to GTF annotation file
         --star_index      Path to pre-built STAR index directory (optional, will generate if not provided)
@@ -356,13 +360,6 @@ workflow {
         exit 0
     }
 
-    // Validate required parameters
-    if (!params.input_dir) {
-        error "Please provide --input_dir parameter"
-    }
-    if (!params.gtf) {
-        error "Please provide --gtf parameter"
-    }
     if ((!params.star_index || !params.rsem_index) && !params.genome_fasta) {
         error "Please provide --genome_fasta when --star_index or --rsem_index are not provided."
     }
@@ -372,29 +369,28 @@ workflow {
 
     
     // Create reference channels
-    sortmerna_db_ch = Channel.fromPath(params.sortmerna_db, checkIfExists: true)
-    gtf_ch = Channel.fromPath(params.gtf, checkIfExists: true)
-    genome_fasta_ch = params.genome_fasta ? Channel.fromPath(params.genome_fasta, checkIfExists: true) : Channel.empty()
+    gtf_ch = Channel.value(file(params.gtf, checkIfExists: true))
+    genome_fasta_ch = Channel.value(file(params.genome_fasta, checkIfExists: true))
     
     // Handle STAR index - use provided or generate new one
     if (params.star_index) {
         // Use provided STAR index
-        star_index = Channel.fromPath(params.star_index, checkIfExists: true)
+        star_index_ch = Channel.value(file(params.star_index, checkIfExists: true))
         println "Using provided STAR index: ${params.star_index}"
     } else {
         // Generate STAR index from genome fasta
-        star_index = STAR_INDEX(genome_fasta_ch, gtf_ch)
+        star_index_ch = STAR_INDEX(genome_fasta_ch, gtf_ch)
         println "Generating STAR index from genome FASTA"
     }
     
     // Handle RSEM index - use provided or generate new one
     if (params.rsem_index) {
         // Use provided RSEM index
-        rsem_index = Channel.fromPath(params.rsem_index, checkIfExists: true)
+        rsem_index_ch = Channel.value(file(params.rsem_index, checkIfExists: true))
         println "Using provided RSEM index: ${params.rsem_index}"
     } else {
         // Generate RSEM index from genome fasta
-        rsem_index = RSEM_PREPARE_REFERENCE(genome_fasta_ch, gtf_ch)
+        rsem_index_ch = RSEM_PREPARE_REFERENCE(genome_fasta_ch, gtf_ch)
         println "Generating RSEM index from genome FASTA"
     }
     
@@ -411,13 +407,13 @@ workflow {
     fastqc_trimmed = FASTQC_TRIMMED(fastp_results[0], 'trimmed')
     
     // Run SortMeRNA to remove rRNA
-    sortmerna_results = SORTMERNA(fastp_results[0], sortmerna_db_ch)
+    sortmerna_results = SORTMERNA(fastp_results[0])
     
     // Run FastQC on rRNA-filtered reads
     fastqc_filtered = FASTQC_FILTERED(sortmerna_results[0], 'filtered')
     
     // Run STAR alignment
-    star_results = STAR_ALIGN(sortmerna_results[0], star_index, gtf_ch)
+    star_results = STAR_ALIGN(sortmerna_results[0], star_index_ch, gtf_ch)
     
     star_for_downstream = star_results[0]
         .map { sample_id, sorted_bam, sorted_bai, transcriptome_bam -> tuple(sample_id, sorted_bam, sorted_bai) }
@@ -435,7 +431,7 @@ workflow {
     preseq_results = PRESEQ(star_for_downstream)
 
     // Run RSEM
-    rsem_results = RSEM_QUANTIFICATION(rsem_input, rsem_index)
+    rsem_results = RSEM_QUANTIFICATION(rsem_input, rsem_index_ch)
     
     // Collect all results for MultiQC
     multiqc_input = fastqc_raw.report
