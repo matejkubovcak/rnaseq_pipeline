@@ -179,6 +179,22 @@ nextflow run main.nf --help
 nextflow run main.nf --version
 ```
 
+
+## aggregate results
+```
+# Go to the directory containing your .genes.results files
+cd results/rsem
+
+# List all .genes.results files (adjust path as needed)
+ls *.genes.results > genes_results_list.txt
+
+# Or, if files are in subfolders, use:
+find . -name "*.genes.results" | sort > genes_results_list.txt
+
+# Generate the data matrix
+rsem-generate-data-matrix $(cat genes_results_list.txt) > rsem_data_matrix.txt
+```
+
 ## Citation
 
 If you use this pipeline in your research, please cite the tools it uses:
@@ -196,3 +212,4 @@ If you use this pipeline in your research, please cite the tools it uses:
 ## License
 
 This pipeline is released under the MIT License. 
+

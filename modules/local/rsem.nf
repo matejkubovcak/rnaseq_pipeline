@@ -26,9 +26,10 @@ process RSEM_QUANTIFICATION {
     tag "$sample_id"
     publishDir "${params.outdir}/rsem/${sample_id}", mode: 'copy'
     conda 'bioconda::rsem=1.3.3'
-    cpus 8
-    memory '32.GB'
-    debug true
+    cpus 32
+    memory '64.GB'
+    errorStrategy 'retry'
+    maxRetries 3
 
     input:
     tuple val(sample_id), path(transcriptome_bam)
